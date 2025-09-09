@@ -1,3 +1,4 @@
+```
 [1m[96mOADP CRD Version Comparison Report[0m
 [96m============================================================[0m
 Comparing versions: 1.3, 1.4, 1.5
@@ -351,3 +352,4 @@ TOTAL                                              [92m2472    [0m [91m292   
   Files with only removals: [91m0[0m
   Files with both changes: [93m2[0m
   Files unchanged: [97m14[0m
+```

@@ -194,6 +194,141 @@ class CRDComparator:
         
         return changes
     
+    def generate_markdown_report(self, output_file: str = None) -> str:
+        """Generate a comprehensive comparison report in markdown format."""
+        lines = []
+        lines.append("# OADP CRD Version Comparison Report")
+        lines.append("")
+        lines.append(f"**Comparing versions:** {', '.join(self.versions)}")
+        lines.append(f"**Common files found:** {len(self.common_files)}")
+        if not self.show_additions:
+            lines.append("**Note:** Hiding additions by default. Use --show-additions to see added parameters.")
+        lines.append("")
+        
+        total_changes = 0
+        files_with_changes = 0
+        
+        for filename in self.common_files:
+            changes = self.compare_versions(filename)
+            
+            # Filter changes based on show_additions flag
+            if not self.show_additions:
+                changes = [c for c in changes if c.change_type == "removed"]
+            
+            if changes:
+                files_with_changes += 1
+                total_changes += len(changes)
+                
+                lines.append(f"## 📄 File: `{filename}`")
+                lines.append("")
+                
+                # Group changes by type and version pair
+                grouped_changes = defaultdict(list)
+                for change in changes:
+                    key = f"{change.version_from}→{change.version_to}"
+                    grouped_changes[key].append(change)
+                
+                for version_pair, version_changes in grouped_changes.items():
+                    lines.append(f"### {version_pair}")
+                    lines.append("")
+                    
+                    # Sort by change type (removed first, then added)
+                    version_changes.sort(key=lambda x: (x.change_type == "added", x.full_path))
+                    
+                    for change in version_changes:
+                        if change.change_type == "removed":
+                            icon = "❌"
+                            action = "**REMOVED**"
+                        else:
+                            icon = "✅"
+                            action = "**ADDED**"
+                        
+                        lines.append(f"- {icon} {action}: `{change.full_path}`")
+                        if change.line_number > 0:
+                            lines.append(f"  - Line {change.line_number} in version {change.version_to if change.change_type == 'added' else change.version_from}")
+                    lines.append("")
+                
+                lines.append("")
+        
+        # Summary
+        lines.append("## 📊 Summary")
+        lines.append("")
+        lines.append(f"- **Files analyzed:** {len(self.common_files)}")
+        lines.append(f"- **Files with changes:** {files_with_changes}")
+        
+        # Calculate actual counts from all changes (not filtered)
+        all_changes = []
+        file_stats = {}
+        
+        for filename in self.common_files:
+            file_changes = self.compare_versions(filename)
+            all_changes.extend(file_changes)
+            
+            # Count additions and removals per file
+            file_added = sum(1 for c in file_changes if c.change_type == "added")
+            file_removed = sum(1 for c in file_changes if c.change_type == "removed")
+            file_stats[filename] = {
+                'added': file_added,
+                'removed': file_removed,
+                'total': file_added + file_removed
+            }
+        
+        added_count = sum(1 for c in all_changes if c.change_type == "added")
+        removed_count = sum(1 for c in all_changes if c.change_type == "removed")
+        
+        if self.show_additions:
+            lines.append(f"- **Total parameter changes:** {total_changes}")
+            if total_changes == 0:
+                lines.append("- ✅ **No parameter differences found across versions!**")
+            else:
+                lines.append(f"- ✅ **Parameters added:** {added_count}")
+                lines.append(f"- ❌ **Parameters removed:** {removed_count}")
+        else:
+            lines.append(f"- **Parameters removed (shown):** {total_changes}")
+            lines.append(f"- ❌ **Parameters removed:** {removed_count}")
+            if added_count > 0:
+                lines.append(f"- 💡 **Parameters added (hidden):** {added_count} - use --show-additions to view")
+        
+        lines.append("")
+        
+        # Detailed file breakdown
+        lines.append("## 📄 File Analysis Breakdown")
+        lines.append("")
+        lines.append("| File Name | Added | Removed | Total |")
+        lines.append("|-----------|--------|---------|-------|")
+        
+        # Sort files by total changes (descending), then by name
+        sorted_files = sorted(file_stats.items(), key=lambda x: (-x[1]['total'], x[0]))
+        
+        for filename, stats in sorted_files:
+            lines.append(f"| `{filename}` | {stats['added']} | {stats['removed']} | {stats['total']} |")
+        
+        lines.append(f"| **TOTAL** | **{added_count}** | **{removed_count}** | **{added_count + removed_count}** |")
+        
+        # Additional insights
+        lines.append("")
+        files_with_only_additions = sum(1 for stats in file_stats.values() if stats['added'] > 0 and stats['removed'] == 0)
+        files_with_only_removals = sum(1 for stats in file_stats.values() if stats['removed'] > 0 and stats['added'] == 0)
+        files_with_both = sum(1 for stats in file_stats.values() if stats['added'] > 0 and stats['removed'] > 0)
+        files_unchanged = sum(1 for stats in file_stats.values() if stats['total'] == 0)
+        
+        lines.append("## 📈 Change Distribution")
+        lines.append("")
+        lines.append(f"- **Files with only additions:** {files_with_only_additions}")
+        lines.append(f"- **Files with only removals:** {files_with_only_removals}")
+        lines.append(f"- **Files with both changes:** {files_with_both}")
+        lines.append(f"- **Files unchanged:** {files_unchanged}")
+        
+        markdown_content = "\n".join(lines)
+        
+        # Save to file if specified
+        if output_file:
+            with open(output_file, 'w') as f:
+                f.write(markdown_content)
+            print(f"Markdown report saved to: {output_file}")
+        
+        return markdown_content
+
     def generate_report(self) -> None:
         """Generate a comprehensive comparison report."""
         print(f"{Colors.BOLD}{Colors.CYAN}OADP CRD Version Comparison Report{Colors.END}")
@@ -339,10 +474,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 oadp_crd_comparison.py                    # Prompt for directory (default: /var/tmp/OADP)
-  python3 oadp_crd_comparison.py --show-additions   # Show both additions and removals
-  python3 oadp_crd_comparison.py /path/to/oadp      # Use specific directory
-  python3 oadp_crd_comparison.py --non-interactive  # Use default directory without prompting
+  python3 oadp_crd_comparison.py                         # Prompt for directory (default: /var/tmp/OADP)
+  python3 oadp_crd_comparison.py --show-additions        # Show both additions and removals
+  python3 oadp_crd_comparison.py /path/to/oadp           # Use specific directory
+  python3 oadp_crd_comparison.py --non-interactive       # Use default directory without prompting
+  python3 oadp_crd_comparison.py --markdown              # Output in markdown format to console
+  python3 oadp_crd_comparison.py --markdown --output-file report.md  # Save markdown to file
+  python3 oadp_crd_comparison.py --output-file report.txt            # Save console output to file
         """
     )
     
@@ -362,6 +500,18 @@ Examples:
         "--non-interactive",
         action="store_true",
         help="Use default directory (/var/tmp/OADP) without prompting when no directory is specified."
+    )
+    
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Output results in markdown format instead of colored console text."
+    )
+    
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        help="Save output to specified file. If not specified with --markdown, prints markdown to console."
     )
     
     args = parser.parse_args()
@@ -391,7 +541,34 @@ Examples:
     
     try:
         comparator = CRDComparator(directory, args.show_additions)
-        comparator.generate_report()
+        
+        if args.markdown:
+            # Generate markdown report
+            if args.output_file:
+                # Save to file
+                comparator.generate_markdown_report(args.output_file)
+            else:
+                # Print to console
+                markdown_content = comparator.generate_markdown_report()
+                print(markdown_content)
+        else:
+            # Generate regular colored console report
+            if args.output_file:
+                # Redirect console output to file (includes ANSI codes)
+                with open(args.output_file, 'w') as f:
+                    import io
+                    import contextlib
+                    
+                    old_stdout = sys.stdout
+                    sys.stdout = f
+                    try:
+                        comparator.generate_report()
+                    finally:
+                        sys.stdout = old_stdout
+                print(f"Console report saved to: {args.output_file}")
+            else:
+                comparator.generate_report()
+                
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
         sys.exit(1)
